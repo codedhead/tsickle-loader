@@ -1,21 +1,20 @@
 import fs from "fs-extra";
 import * as path from "path";
-import { getOptions, OptionObject } from "loader-utils";
-import validateOptions = require("schema-utils");
-import tsickle = require("tsickle");
+import { validate } from "schema-utils";
+import * as tsickle from "tsickle";
 import ts from "typescript";
 import { EOL } from "os";
-import webpack = require("webpack");
+import webpack from "webpack";
 import { fixCode, fixExtern } from "./fix-output";
 import { jsToTS, tsToJS } from "./path-utils";
-import { TcpSocketConnectOpts } from "net";
+import { JSONSchema7 } from "json-schema";
 
 const LOADER_NAME = "tsickle-loader";
 const DEFAULT_EXTERN_DIR = "dist/externs";
 const EXTERNS_FILE_NAME = "externs.js";
 const DEFAULT_CONFIG_FILE = "tsconfig.json";
 
-const optionsSchema = {
+const optionsSchema: JSONSchema7 = {
   type: "object",
   properties: {
     tsconfig: {
@@ -34,16 +33,16 @@ const optionsSchema = {
   }
 };
 
-interface RealOptions extends OptionObject {
+interface RealOptions {
   externDir: string;
   tsconfig: string;
   externFile: string;
   compilerConfig: ReturnType<typeof ts.parseJsonConfigFileContent>;
 }
 
-const setup = (loaderCTX: webpack.loader.LoaderContext): RealOptions => {
-  const options = getOptions(loaderCTX);
-  validateOptions(optionsSchema, options, LOADER_NAME);
+const setup = (loaderCTX: LoaderCTX): RealOptions => {
+  const options = loaderCTX.getOptions();
+  validate(optionsSchema, options, { name: LOADER_NAME });
 
   const externDir =
     options.externDir != null ? options.externDir : DEFAULT_EXTERN_DIR;
@@ -78,7 +77,7 @@ const setup = (loaderCTX: webpack.loader.LoaderContext): RealOptions => {
   };
 };
 
-type LoaderCTX = webpack.loader.LoaderContext;
+type LoaderCTX = webpack.LoaderContext<RealOptions>;
 
 const handleDiagnostics = (
   ctx: LoaderCTX,
@@ -92,13 +91,13 @@ const handleDiagnostics = (
   );
 
   if (type === "error") {
-    ctx.emitError(Error(formatted));
+    ctx.emitError(new Error(formatted));
   } else {
-    ctx.emitWarning(formatted);
+    ctx.emitWarning(new Error(formatted));
   }
 };
 
-const tsickleLoader: webpack.loader.Loader = function(
+const tsickleLoader = function (
   this: LoaderCTX,
   _source: string | Buffer
 ) {
@@ -131,7 +130,6 @@ const tsickleLoader: webpack.loader.Loader = function(
     pathToModuleName: (name: string) => name,
     fileNameToModuleId: (name: string) => name,
     options: {}, // TODO: set possible options here
-    es5Mode: true,
     moduleResolutionHost: compilerHost,
     googmodule: false,
     transformDecorators: true,
@@ -139,7 +137,9 @@ const tsickleLoader: webpack.loader.Loader = function(
     typeBlackListPaths: new Set(),
     untyped: false,
     logWarning: warning =>
-      handleDiagnostics(this, [warning], diagnosticsHost, "warning")
+      handleDiagnostics(this, [warning], diagnosticsHost, "warning"),
+    generateExtraSuppressions: true,
+    rootDirsRelative: (f: string) => f,
   };
 
   const jsFiles = new Map<string, string>();

@@ -5,8 +5,6 @@ const Memoryfs = require('memory-fs')
 module.exports = (fixture, options = {}) => {
   const compiler = webpack({
     stats: {
-      // Examine all modules
-      maxModules: Infinity,
       // Display bailout reasons
       optimizationBailout: true
     },

@@ -2,6 +2,7 @@ const compiler = require('./compiler.js')
 const fs = require('fs-extra')
 const path = require('path')
 const ClosureCompilerPlugin = require('closure-webpack-plugin')
+jest.setTimeout(20000);
 
 test('Converts a simple es6 function', async () => {
   const [output] = await compiler('examples/hello-world.ts')
@@ -37,7 +38,7 @@ test('It will correctly collapse unnecessary modules (tree shaking)', async () =
   })
 
   expect(output).toContain('myRealExport')
-}, 10e3)
+})
 
 test('will work with closure compiler plugin', async () => {
   const externDir = path.resolve(__dirname, 'tmp', 'externs-' + Math.floor(Math.random() * 10))
@@ -75,6 +76,6 @@ test('will work with closure compiler plugin', async () => {
     externDir
   })
 
-  fs.writeFileSync('./complex-example.js', output)
+  fs.writeFileSync(path.resolve(__dirname,'tmp/complex-example.js'), output)
   expect(output).toBeTruthy()
-}, 15e3) // this can be *very* slow
+}) // this can be *very* slow
