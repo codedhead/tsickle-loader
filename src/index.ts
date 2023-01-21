@@ -7,7 +7,6 @@ import { EOL } from "os";
 import webpack from "webpack";
 import { fixCode, fixExtern } from "./fix-output";
 import { JSONSchema7 } from "json-schema";
-import { RawSourceMap } from "source-map";
 
 const LOADER_NAME = "tsickle-loader";
 const DEFAULT_EXTERN_DIR = "dist/externs";
@@ -29,6 +28,19 @@ const optionsSchema: JSONSchema7 = {
     },
     externDir: {
       type: "string"
+    },
+    skipTsickleProcessing: {
+      anyOf: [
+        {
+          type: "string"
+        },
+        {
+          type: "array",
+          items: {
+            type: "string"
+          }
+        }
+      ]
     }
   }
 };
@@ -38,6 +50,7 @@ interface RealOptions {
   tsconfig: string;
   externFile: string;
   compilerConfig: ReturnType<typeof ts.parseJsonConfigFileContent>;
+  skipTsickleProcessing: string | string[];
 }
 
 const setup = (loaderCTX: LoaderCTX): RealOptions => {
@@ -73,7 +86,8 @@ const setup = (loaderCTX: LoaderCTX): RealOptions => {
     tsconfig,
     externDir,
     externFile,
-    compilerConfig
+    compilerConfig,
+    skipTsickleProcessing: options.skipTsickleProcessing,
   };
 };
 
@@ -97,17 +111,21 @@ const handleDiagnostics = (
   }
 };
 
+// persisted across files handled by the loader
+const externsAlreadyGenerated = new Set();
 const tsickleLoader = function (
   this: LoaderCTX,
   _source: string | Buffer
 ) {
   const {
     compilerConfig: { options },
-    externFile
+    externFile,
+    skipTsickleProcessing,
   } = setup(this);
 
   // normalize the path to unix-style
   const sourceFileName = this.resourcePath.replace(/\\/g, "/");
+  const rootModulePath = options.rootDir || path.dirname(sourceFileName);
   const compilerHost = ts.createCompilerHost(options);
   const program = ts.createProgram([sourceFileName], options, compilerHost);
   const diagnostics = ts.getPreEmitDiagnostics(program);
@@ -115,7 +133,7 @@ const tsickleLoader = function (
   const diagnosticsHost: ts.FormatDiagnosticsHost = {
     getNewLine: () => EOL,
     getCanonicalFileName: fileName => fileName,
-    getCurrentDirectory: () => path.dirname(sourceFileName)
+    getCurrentDirectory: () => rootModulePath,
   };
 
   if (diagnostics.length > 0) {
@@ -124,12 +142,32 @@ const tsickleLoader = function (
   }
 
   const tsickleHost: tsickle.TsickleHost = {
-    shouldSkipTsickleProcessing: (filename: string) =>
-      sourceFileName !== filename,
+    shouldSkipTsickleProcessing: (filename: string) => {
+      if (externsAlreadyGenerated.has(filename)) {
+        return true;
+      }
+      externsAlreadyGenerated.add(filename);
+      // do not skip any
+      if (!skipTsickleProcessing || skipTsickleProcessing.length === 0) {
+        return false;
+      }
+      // skip everything except for current source file
+      if (skipTsickleProcessing === '*') {
+        return sourceFileName !== filename;
+      }
+      const denyList = (typeof skipTsickleProcessing === 'string') ? [skipTsickleProcessing] : skipTsickleProcessing;
+      for (const x of denyList) {
+        if (filename.includes(x)) {
+          return true;
+        }
+      }
+      return false;
+    },
     shouldIgnoreWarningsForPath: () => false,
-    pathToModuleName: (name: string) => name,
-    fileNameToModuleId: (name: string) => name,
-    options: {}, // TODO: set possible options here
+    pathToModuleName: (context, fileName) =>
+      tsickle.pathToModuleName(rootModulePath, context, fileName),
+    fileNameToModuleId: (fileName) => path.relative(rootModulePath, fileName),
+    options,
     moduleResolutionHost: compilerHost,
     googmodule: false,
     transformDecorators: true,
@@ -158,33 +196,22 @@ const tsickleLoader = function (
           }
         }
       }
-    },
-    program.getSourceFile(sourceFileName)
+    }
   );
 
-  if (transpiledSources.length !== 1) {
+  const extern = tsickle.getGeneratedExterns(output.externs, rootModulePath);
+  if (transpiledSources.length !== 1 && !extern) {
     this.emitError(
-      Error(`missing compiled result for source file: ${sourceFileName}`)
-    );
-    return;
-  }
-  if (this.sourceMap && transpiledSourceMaps.length !== 1) {
-    this.emitError(
-      Error(`tsconfig must specify sourceMap: "true" when sourcemaps are enabled!`)
+      Error(`missing both compiled code and externs for source file: ${sourceFileName}`)
     );
     return;
   }
 
-  const extern = output.externs[sourceFileName];
-  if (extern != null) {
+  if (extern) {
     fs.appendFileSync(externFile, fixExtern(extern));
   }
 
-  let sourceMap: RawSourceMap | undefined = undefined;
-  if (this.sourceMap) {
-    sourceMap = JSON.parse(transpiledSourceMaps[0]);
-  }
-  this.callback(null, fixCode(transpiledSources[0]), sourceMap);
+  this.callback(null, fixCode(transpiledSources[0] || ''));
 };
 
 export default tsickleLoader;
