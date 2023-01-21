@@ -9,7 +9,8 @@
   "sideEffects": false,
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "rm -rf ./test/tmp/* && jest"
+    "test": "rm -rf ./test/tmp/* && jest",
+    "prepare": "npm run build"
   },
   "jest": {
     "testEnvironment": "node"
